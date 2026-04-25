@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"seo-audit-tool/config"
+	configs "seo-audit-tool/config"
 	"seo-audit-tool/internal/analyzer"
 	"seo-audit-tool/internal/crawler"
 	"seo-audit-tool/internal/storage"
@@ -102,34 +102,42 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 func (s *Server) runAudit(audit *storage.Audit) {
 	defer func() {
 		if r := recover(); r != nil {
+			log.Printf("Audit %s failed with panic: %v", audit.ID, r)
 			audit.Status = "failed"
 			audit.Error = "Internal error occurred"
 			s.db.UpdateAudit(audit)
 		}
 	}()
 
+	log.Printf("Starting audit %s for URL: %s", audit.ID, audit.URL)
+
 	// Crawl the website
 	pages, err := s.crawler.CrawlSite(audit.URL, 10) // Limit to 10 pages for demo
 	if err != nil {
+		log.Printf("Audit %s crawl failed: %v", audit.ID, err)
 		audit.Status = "failed"
 		audit.Error = err.Error()
 		s.db.UpdateAudit(audit)
 		return
 	}
 
+	log.Printf("Audit %s crawled %d pages, now analyzing...", audit.ID, len(pages))
+
 	// Analyze pages
 	results := make([]*storage.PageResult, 0, len(pages))
-	for _, page := range pages {
+	for i, page := range pages {
 		result := s.analyzer.AnalyzePage(page)
 		result.AuditID = audit.ID
 		results = append(results, result)
 		s.db.CreatePageResult(result)
+		log.Printf("Audit %s analyzed page %d/%d: %s", audit.ID, i+1, len(pages), page.URL)
 	}
 
 	// Update audit status
 	audit.Status = "completed"
 	audit.PagesAnalyzed = len(results)
 	s.db.UpdateAudit(audit)
+	log.Printf("Audit %s completed successfully", audit.ID)
 }
 
 func main() {
