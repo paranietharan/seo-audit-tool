@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -21,7 +22,7 @@ func NewCrawler() *Crawler {
 
 func (c *Crawler) CrawlSite(startURL string, maxPages int) ([]*Page, error) {
 	visited := make(map[string]bool)
-	queue := []string{startURL}
+	queue := []string{c.normalizeURL(startURL)}
 	pages := make([]*Page, 0)
 
 	baseURL, err := url.Parse(startURL)
@@ -47,8 +48,12 @@ func (c *Crawler) CrawlSite(startURL string, maxPages int) ([]*Page, error) {
 
 		// Add internal links to queue
 		for _, link := range page.Links {
-			if c.isInternalLink(link, baseURL) && !visited[link] {
-				queue = append(queue, link)
+			normalizedLink := c.normalizeURL(link)
+			if normalizedLink == "" {
+				continue
+			}
+			if c.isInternalLink(normalizedLink, baseURL) && !visited[normalizedLink] {
+				queue = append(queue, normalizedLink)
 			}
 		}
 
@@ -118,6 +123,10 @@ func (c *Crawler) isInternalLink(link string, baseURL *url.URL) bool {
 		return false
 	}
 
+	if linkURL.Scheme != "" && linkURL.Scheme != "http" && linkURL.Scheme != "https" {
+		return false
+	}
+
 	return linkURL.Host == "" || linkURL.Host == baseURL.Host
 }
 
@@ -134,6 +143,27 @@ func (c *Crawler) resolveURL(href, baseURL string) string {
 
 	resolved := base.ResolveReference(link)
 	return resolved.String()
+}
+
+func (c *Crawler) normalizeURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+
+	if parsed.Scheme != "" && parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return ""
+	}
+
+	parsed.Fragment = ""
+	if parsed.Scheme == "" && parsed.Host == "" && !strings.HasPrefix(rawURL, "/") {
+		return ""
+	}
+	if parsed.Host == "" && parsed.Scheme == "" {
+		return parsed.String()
+	}
+
+	return parsed.String()
 }
 
 func (c *Crawler) Close() {
