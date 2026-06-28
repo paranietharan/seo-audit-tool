@@ -12,10 +12,10 @@ def generate_report(audit_data: dict) -> GeminiReport:
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable is not set")
 
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    system_prompt = "You are an SEO expert. Analyze the provided website audit data and return ONLY valid JSON with no markdown, no explanation."
+    model = genai.GenerativeModel("gemini-3.5-flash", system_instruction=system_prompt)
 
     # Build prompt instructing Gemini
-    system_prompt = "You are an SEO expert. Analyze the provided website audit data and return ONLY valid JSON with no markdown, no explanation."
     user_prompt = (
         f"Audit data: {json.dumps(audit_data)}\n\n"
         "Return JSON format:\n"
@@ -31,8 +31,7 @@ def generate_report(audit_data: dict) -> GeminiReport:
     response = model.generate_content(
         contents=user_prompt,
         generation_config={
-            "response_mime_type": "application/json",
-            "system_instruction": system_prompt
+            "response_mime_type": "application/json"
         }
     )
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -48,8 +49,25 @@ type Scraper struct {
 }
 
 func NewScraper() (*Scraper, error) {
-	l := launcher.New().
-		NoSandbox(true).
+	binPath := os.Getenv("CHROMIUM_PATH")
+	if binPath == "" {
+		for _, path := range []string{
+			"/usr/bin/chromium",
+			"/usr/bin/chromium-browser",
+			"/usr/bin/google-chrome",
+		} {
+			if _, err := os.Stat(path); err == nil {
+				binPath = path
+				break
+			}
+		}
+	}
+
+	l := launcher.New()
+	if binPath != "" {
+		l = l.Bin(binPath)
+	}
+	l = l.NoSandbox(true).
 		Set("disable-dev-shm-usage").
 		Headless(true)
 
