@@ -16,6 +16,7 @@ COPY . .
 RUN go build -o main ./cmd/main.go
 
 ENV PORT=8081
+ENV CHROMIUM_PATH=/usr/bin/chromium-browser
 EXPOSE 8081
 
 CMD ["./main"]
