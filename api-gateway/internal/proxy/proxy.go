@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -26,7 +27,7 @@ func NewProxy(auditURL, reportURL string) (*Proxy, error) {
 	auditProxy := httputil.NewSingleHostReverseProxy(aURL)
 	reportProxy := httputil.NewSingleHostReverseProxy(rURL)
 
-	// Deduplicate CORS headers by removing them from backend responses
+	// Deduplicate backend CORS headers so gateway controls CORS cleanly
 	modifyResponse := func(resp *http.Response) error {
 		resp.Header.Del("Access-Control-Allow-Origin")
 		resp.Header.Del("Access-Control-Allow-Credentials")
@@ -37,16 +38,33 @@ func NewProxy(auditURL, reportURL string) (*Proxy, error) {
 	auditProxy.ModifyResponse = modifyResponse
 	reportProxy.ModifyResponse = modifyResponse
 
-	// Rewrite paths
+	// Upstream error handlers returning JSON
+	auditProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		log.Printf("audit proxy upstream error: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":"audit_service_unavailable","detail":"Unable to reach audit service backend"}`))
+	}
+
+	reportProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		log.Printf("report proxy upstream error: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":"report_service_unavailable","detail":"Unable to reach report service backend"}`))
+	}
+
+	// Rewrite paths and update Host header
 	origAuditDirector := auditProxy.Director
 	auditProxy.Director = func(req *http.Request) {
 		origAuditDirector(req)
+		req.Host = aURL.Host
 		req.URL.Path = "/audit"
 	}
 
 	origReportDirector := reportProxy.Director
 	reportProxy.Director = func(req *http.Request) {
 		origReportDirector(req)
+		req.Host = rURL.Host
 		req.URL.Path = "/report"
 	}
 
@@ -69,12 +87,13 @@ func CORS() gin.HandlerFunc {
 		origin := c.Request.Header.Get("Origin")
 		if origin != "" {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		} else {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		}
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)

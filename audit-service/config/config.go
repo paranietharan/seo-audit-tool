@@ -1,4 +1,4 @@
-package configs
+package config
 
 import (
 	"os"
@@ -7,19 +7,17 @@ import (
 )
 
 type Config struct {
-	Port        string
-	DatabaseURL string
-	Debug       bool
+	Port  string
+	Debug bool
 }
 
 func NewConfig() *Config {
-	// Load .env file if it exists
+	// Load .env file if present
 	_ = godotenv.Load()
 
 	return &Config{
-		Port:        getEnv("PORT", "8080"),
-		DatabaseURL: getEnv("DATABASE_URL", "postgres://postgres:root@localhost:5432/seo_audit?sslmode=disable"),
-		Debug:       getEnv("DEBUG", "false") == "true",
+		Port:  getEnv("PORT", "8081"),
+		Debug: getEnv("DEBUG", "false") == "true",
 	}
 }
 
