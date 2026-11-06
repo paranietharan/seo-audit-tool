@@ -4,7 +4,8 @@ import logging
 import os
 import re
 from typing import Any, Dict, List
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from models import GeminiReport, Issue
 
 logger = logging.getLogger("report-service.gemini")
@@ -143,8 +144,10 @@ def _generate_report_sync(audit_data: dict) -> GeminiReport:
         logger.warning("GEMINI_API_KEY is not configured. Falling back to rule-based analysis.")
         return _fallback_rule_based_report(audit_data)
 
-    model_name = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip()
-    genai.configure(api_key=api_key)
+    model_name = os.getenv("GEMINI_MODEL", "").strip()
+    if not model_name:
+        logger.warning("GEMINI_MODEL is not configured. Falling back to rule-based analysis.")
+        return _fallback_rule_based_report(audit_data)
 
     system_prompt = (
         "You are a professional technical SEO specialist and web auditor. "
@@ -153,8 +156,6 @@ def _generate_report_sync(audit_data: dict) -> GeminiReport:
     )
 
     try:
-        model = genai.GenerativeModel(model_name, system_instruction=system_prompt)
-
         user_prompt = (
             f"Audit Data:\n{json.dumps(audit_data, indent=2)}\n\n"
             "Return a JSON object with this exact structure:\n"
@@ -174,13 +175,16 @@ def _generate_report_sync(audit_data: dict) -> GeminiReport:
             "}"
         )
 
-        response = model.generate_content(
-            contents=user_prompt,
-            generation_config={
-                "response_mime_type": "application/json",
-                "temperature": 0.2
-            }
-        )
+        with genai.Client(api_key=api_key) as client:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    response_mime_type="application/json",
+                    temperature=0.2,
+                ),
+            )
 
         raw_text = response.text or ""
         cleaned_json = _clean_json_markdown(raw_text)
@@ -202,11 +206,9 @@ def _generate_report_sync(audit_data: dict) -> GeminiReport:
             quick_wins=[str(w) for w in parsed.get("quick_wins", [])],
             strengths=[str(s) for s in parsed.get("strengths", [])]
         )
-    except Exception as exc:
-        logger.error(f"Gemini API generation failed ({exc}). Falling back to rule-based report.")
-        fallback = _fallback_rule_based_report(audit_data)
-        fallback.summary += f" (Note: AI summary fallback due to: {str(exc)})"
-        return fallback
+    except Exception:
+        logger.warning("Gemini report unavailable. Falling back to rule-based analysis.")
+        return _fallback_rule_based_report(audit_data)
 
 
 async def generate_report_async(audit_data: dict) -> GeminiReport:

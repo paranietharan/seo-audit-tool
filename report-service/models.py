@@ -1,9 +1,15 @@
 from typing import Any, Dict, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl, TypeAdapter, field_validator
 
 
 class ReportRequest(BaseModel):
     url: str = Field(..., description="Target website URL to audit")
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        TypeAdapter(HttpUrl).validate_python(value)
+        return value
 
 
 class Issue(BaseModel):
