@@ -24,7 +24,7 @@ services:
     environment:
       - PORT=8082
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GEMINI_MODEL=gemini-2.0-flash
+      - GEMINI_MODEL=${GEMINI_MODEL:-}
       - AUDIT_SERVICE_URL=http://audit-service:8081
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8082/health')\" || exit 1"]

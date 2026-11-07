@@ -37,7 +37,7 @@ A four-service web application for crawling web pages, checking technical SEO si
 ### Services
 1. **`api-gateway` (`Go / Gin`, `:8080`)**: Reverse proxy that handles CORS, request validation, and routing between the React frontend, `audit-service`, and `report-service`.
 2. **`audit-service` (`Go / Go-Rod / GoQuery`, `:8081`)**: Headless Chromium crawler with a 4-tab concurrency semaphore. Renders client-side JavaScript pages, extracts meta tags, canonical/OpenGraph URLs, heading hierarchy (`H1`/`H2`), links, and images missing `alt` attributes, and validates resolved IPs before crawling to block private/loopback SSRF targets.
-3. **`report-service` (`Python / FastAPI`, `:8082`)**: Calls `audit-service` to collect raw page metrics and prompts Google Gemini (`gemini-2.0-flash`) for a structured JSON SEO report. Includes a deterministic rule-based scoring fallback (`_fallback_rule_based_report`) so reports still complete if the Gemini API times out or hits quota limits.
+3. **`report-service` (`Python / FastAPI`, `:8082`)**: Calls `audit-service` to collect raw page metrics and prompts Google Gemini (using the explicitly configured `GEMINI_MODEL`) for a structured JSON SEO report. Includes a deterministic rule-based scoring fallback (`_fallback_rule_based_report`) so reports still complete if the Gemini API times out or hits quota limits.
 4. **`frontend` (`React 18 / Vite / Tailwind CSS`, `:3000`)**: Web dashboard for running audits, filtering issues by severity, inspecting raw DOM metrics, viewing local audit history, and exporting reports as JSON.
 
 ---
@@ -176,3 +176,9 @@ npm run dev
 
 ### 3. Health Check
 `GET /health` on `:8080`, `:8081`, or `:8082` returns `{"status": "ok"}`.
+
+## Report service verification
+
+Use Python 3.12. Install `report-service/requirements.txt` and pytest, then run `python -m pytest` from `report-service/`. Tests mock provider calls and need no API key. The service uses the supported `google-genai` SDK. Set both `GEMINI_API_KEY` and `GEMINI_MODEL` to a model available to your account; when either is absent, or generation fails, reports use deterministic rule-based scoring. Provider error details are not returned in reports.
+
+CI also builds the frontend and tests both Go modules with Go 1.27.3.
