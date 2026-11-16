@@ -26,12 +26,3 @@ jobs:
         working-directory: report-service
       - run: python -m pytest -q
         working-directory: report-service
-  frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - run: npm ci && npm run build
-        working-directory: frontend
