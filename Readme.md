@@ -1,6 +1,6 @@
 # SEO Audit Tool
 
-A four-service web application for crawling web pages, checking technical SEO signals, and generating structured audit reports using **Go (Gin & Go-Rod)**, **Python (FastAPI)**, **React (Vite & Tailwind CSS)**, and **Google Gemini**.
+The backend for a web application for crawling web pages, checking technical SEO signals, and generating structured audit reports using **Go (Gin & Go-Rod)**, **Python (FastAPI)**, and **Google Gemini**. The React frontend lives in [seo-audit-tool-web](https://github.com/paranietharan/seo-audit-tool-web).
 
 ---
 
@@ -38,7 +38,7 @@ A four-service web application for crawling web pages, checking technical SEO si
 1. **`api-gateway` (`Go / Gin`, `:8080`)**: Reverse proxy that handles CORS, request validation, and routing between the React frontend, `audit-service`, and `report-service`.
 2. **`audit-service` (`Go / Go-Rod / GoQuery`, `:8081`)**: Headless Chromium crawler with a 4-tab concurrency semaphore. Renders client-side JavaScript pages, extracts meta tags, canonical/OpenGraph URLs, heading hierarchy (`H1`/`H2`), links, and images missing `alt` attributes, and validates resolved IPs before crawling to block private/loopback SSRF targets.
 3. **`report-service` (`Python / FastAPI`, `:8082`)**: Calls `audit-service` to collect raw page metrics and prompts Google Gemini (using the explicitly configured `GEMINI_MODEL`) for a structured JSON SEO report. Includes a deterministic rule-based scoring fallback (`_fallback_rule_based_report`) so reports still complete if the Gemini API times out or hits quota limits.
-4. **`frontend` (`React 18 / Vite / Tailwind CSS`, `:3000`)**: Web dashboard for running audits, filtering issues by severity, inspecting raw DOM metrics, viewing local audit history, and exporting reports as JSON.
+4. **[Web frontend](https://github.com/paranietharan/seo-audit-tool-web) (`React 18 / Vite / Tailwind CSS`, `:3000`)**: Separately maintained dashboard for running audits and viewing reports.
 
 ---
 
@@ -56,12 +56,12 @@ Set your Gemini API key in `.env` (if omitted or quota-exhausted, `report-servic
 GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-### 2. Start All Services
+### 2. Start Backend Services
 ```bash
 docker compose up --build
 ```
 
-- **Frontend Dashboard**: `http://localhost:3000`
+- **Frontend Dashboard**: Run the separate [web app](https://github.com/paranietharan/seo-audit-tool-web) on `http://localhost:3000`.
 - **API Gateway**: `http://localhost:8080`
 - **Audit Service Health**: `http://localhost:8081/health`
 - **Report Service OpenAPI Docs**: `http://localhost:8082/docs`
@@ -95,13 +95,9 @@ export GEMINI_API_KEY="your-api-key"
 uvicorn main:app --host 0.0.0.0 --port 8082 --reload
 ```
 
-### 4. Frontend (`frontend`)
-```bash
-cd frontend
-npm install
-npm run dev
-# Opens on http://localhost:3000
-```
+### 4. Web frontend
+
+See the [web repository](https://github.com/paranietharan/seo-audit-tool-web) for installation, configuration, and Docker instructions.
 
 ---
 
@@ -181,4 +177,4 @@ npm run dev
 
 Use Python 3.12. Install `report-service/requirements.txt` and pytest, then run `python -m pytest` from `report-service/`. Tests mock provider calls and need no API key. The service uses the supported `google-genai` SDK. Set both `GEMINI_API_KEY` and `GEMINI_MODEL` to a model available to your account; when either is absent, or generation fails, reports use deterministic rule-based scoring. Provider error details are not returned in reports.
 
-CI also builds the frontend and tests both Go modules with Go 1.27.3.
+CI tests both Go modules with Go 1.27.3; the web repository runs its own build checks.
