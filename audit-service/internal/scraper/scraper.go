@@ -55,9 +55,11 @@ type ScrapeResult struct {
 }
 
 type Scraper struct {
-	browser   *rod.Browser
-	semaphore chan struct{}
-	mu        sync.Mutex
+	transport  *http.Transport
+	closeProxy func()
+	browser    *rod.Browser
+	semaphore  chan struct{}
+	mu         sync.Mutex
 }
 
 func NewScraper() (*Scraper, error) {
@@ -76,7 +78,14 @@ func NewScraper() (*Scraper, error) {
 		}
 	}
 
-	l := launcher.New()
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = dialPublic
+	proxyURL, closeProxy, err := startBrowserProxy(transport)
+	if err != nil {
+		return nil, err
+	}
+	l := launcher.New().Proxy(proxyURL).Set("proxy-bypass-list", "<-loopback>").Set("disable-quic").Set("force-webrtc-ip-handling-policy", "disable_non_proxied_udp")
 	if binPath != "" {
 		l = l.Bin(binPath)
 	}
@@ -87,13 +96,19 @@ func NewScraper() (*Scraper, error) {
 
 	controlURL, err := l.Launch()
 	if err != nil {
+		closeProxy()
 		return nil, fmt.Errorf("failed to launch chromium: %w", err)
 	}
 
-	browser := rod.New().ControlURL(controlURL).MustConnect()
+	browser := rod.New().ControlURL(controlURL)
+	if err := browser.Connect(); err != nil {
+		closeProxy()
+		l.Kill()
+		return nil, err
+	}
 
 	return &Scraper{
-		browser:   browser,
+		transport: transport, closeProxy: closeProxy, browser: browser,
 		semaphore: make(chan struct{}, 4), // Throttle concurrent tabs to max 4
 	}, nil
 }
@@ -104,10 +119,11 @@ func (s *Scraper) Close() {
 	if s.browser != nil {
 		_ = s.browser.Close()
 	}
+	s.closeProxy()
 }
 
 // validatePublicURL prevents SSRF by blocking private/internal IP addresses
-func validatePublicURL(targetURL string) error {
+func validatePublicURL(ctx context.Context, targetURL string) error {
 	parsed, err := url.Parse(targetURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL format: %w", err)
@@ -125,7 +141,7 @@ func validatePublicURL(targetURL string) error {
 	}
 
 	// Resolve IPs for SSRF defense
-	ips, err := net.LookupIP(hostname)
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", hostname)
 	if err != nil {
 		return fmt.Errorf("failed to resolve host %s: %w", hostname, err)
 	}
@@ -139,29 +155,36 @@ func validatePublicURL(targetURL string) error {
 	return nil
 }
 
-func (s *Scraper) Scrape(targetURL string) (*ScrapeResult, error) {
+func (s *Scraper) Scrape(parent context.Context, targetURL string) (*ScrapeResult, error) {
 	// 1. SSRF Protection Validation
-	if err := validatePublicURL(targetURL); err != nil {
+	ctx, cancel := context.WithTimeout(parent, 40*time.Second)
+	defer cancel()
+	if err := validatePublicURL(ctx, targetURL); err != nil {
 		return nil, fmt.Errorf("URL validation failed: %w", err)
 	}
 
 	// 2. Acquire Concurrency Semaphore
-	s.semaphore <- struct{}{}
+	select {
+	case s.semaphore <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	defer func() { <-s.semaphore }()
 
 	// 3. Measure initial HTTP status and redirect chain
 	statusCode := 200
 	client := &http.Client{
-		Timeout: 15 * time.Second,
+		Transport: s.transport,
+		Timeout:   15 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return errors.New("stopped after 10 redirects")
 			}
-			return nil
+			return validatePublicURL(ctx, req.URL.String())
 		},
 	}
 
-	httpReq, err := http.NewRequest("GET", targetURL, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
 	if err == nil {
 		httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 		httpReq.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
@@ -176,18 +199,20 @@ func (s *Scraper) Scrape(targetURL string) (*ScrapeResult, error) {
 
 	// 4. Headless Scraping via Rod
 	start := time.Now()
-	page, err := s.browser.Page(proto.TargetCreateTarget{URL: targetURL})
+	page, err := s.browser.Context(ctx).Page(proto.TargetCreateTarget{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open page in browser: %w", err)
 	}
 	defer func() {
-		_ = page.Close()
+		_ = page.Context(context.Background()).Timeout(3 * time.Second).Close()
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-	defer cancel()
-
-	_ = page.Context(ctx).WaitLoad()
+	if err := page.Navigate(targetURL); err != nil {
+		return nil, fmt.Errorf("navigate: %w", err)
+	}
+	if err := page.WaitLoad(); err != nil {
+		return nil, fmt.Errorf("wait for page: %w", err)
+	}
 	pageLoadMs := time.Since(start).Milliseconds()
 
 	html, err := page.HTML()
