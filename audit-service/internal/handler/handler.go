@@ -45,7 +45,7 @@ func (h *Handler) Audit(c *gin.Context) {
 		return
 	}
 
-	result, err := h.scraper.Scrape(targetURL)
+	result, err := h.scraper.Scrape(c.Request.Context(), targetURL)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
